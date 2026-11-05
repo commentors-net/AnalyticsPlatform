@@ -1,0 +1,29 @@
+# Google Cloud IAM Least-Privilege Policy for Analytics Platform (Unified Model)
+# Project: leave-tracker-2025
+
+service_accounts:
+  - id: sa-analytics-platform
+    display_name: "Analytics Platform Unified Service Account"
+    email: sa-analytics-platform@leave-tracker-2025.iam.gserviceaccount.com
+    description: "Executes analytics-platform Cloud Run service with strict least privilege"
+    project_roles:
+      # Read and write to Cloud Firestore database
+      - role: roles/datastore.user
+      # Emit metrics to Cloud Monitoring
+      - role: roles/monitoring.metricWriter
+      # Write logs to Cloud Logging
+      - role: roles/logging.logWriter
+
+# Secret-Level Access Control (Scoped strictly to analytics secrets, NOT project-wide)
+secret_iam_bindings:
+  - secret: analytics-jwt-secret
+    role: roles/secretmanager.secretAccessor
+    members:
+      - serviceAccount:sa-analytics-platform@leave-tracker-2025.iam.gserviceaccount.com
+
+# Explicit Restrictions:
+# PROHIBITED ROLES for sa-analytics-platform:
+# - roles/editor
+# - roles/owner
+# - roles/storage.admin (strictly zero access to Leave Tracker frontend GCS bucket)
+# - roles/iam.securityAdmin

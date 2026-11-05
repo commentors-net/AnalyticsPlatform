@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Analytics SDK - Vanilla HTML Example</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; line-height: 1.6; }
+    .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+    .btn { padding: 8px 16px; margin-right: 8px; cursor: pointer; border-radius: 4px; border: 1px solid #888; }
+    .btn-primary { background: #0284c7; color: white; border: none; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 6px; }
+  </style>
+  <!-- Load Analytics SDK -->
+  <script src="../dist/analytics.min.js"></script>
+</head>
+<body>
+  <h1>Analytics Platform — Browser SDK Integration</h1>
+
+  <!-- Consent Banner Example -->
+  <div class="card" id="consent-banner">
+    <h3>Privacy & Telemetry Consent</h3>
+    <p>Choose your preferred telemetry privacy level:</p>
+    <button class="btn" onclick="updateConsent('NO_STORAGE')">Opt Out (NO_STORAGE)</button>
+    <button class="btn" onclick="updateConsent('ANONYMOUS')">Anonymous (Session Only)</button>
+    <button class="btn btn-primary" onclick="updateConsent('ANALYTICS_ALLOWED')">Accept Full Analytics</button>
+    <p><strong>Current Consent:</strong> <span id="current-consent">Loading...</span></p>
+  </div>
+
+  <!-- Custom Event Tracking -->
+  <div class="card">
+    <h3>Interactive Event Tracking</h3>
+    <p>Click the buttons below to trigger client-side telemetry events:</p>
+    <button class="btn" onclick="trackCheckout()">Track Checkout Event</button>
+    <button class="btn" onclick="simulateSpaNav('/pricing')">Navigate to /pricing (SPA)</button>
+    <button class="btn" onclick="simulateSpaNav('/docs/api')">Navigate to /docs/api (SPA)</button>
+  </div>
+
+  <div class="card">
+    <h3>Telemetry Console Log</h3>
+    <pre id="log-console">SDK initialized. Events dispatched in batches via beacon...</pre>
+  </div>
+
+  <script>
+    // Initialize Analytics Tracker
+    const tracker = new Analytics.AnalyticsTracker({
+      endpoint: 'http://localhost:8000',
+      writeKey: 'apk_live_sample_browser_key_001',
+      consent: 'ANONYMOUS', // Default consent level
+      autoPageview: true,
+      autoSpa: true,
+    });
+
+    document.getElementById('current-consent').textContent = tracker.getConsent();
+
+    function logMsg(msg) {
+      const consoleEl = document.getElementById('log-console');
+      consoleEl.textContent += '\n' + new Date().toLocaleTimeString() + ' - ' + msg;
+    }
+
+    function updateConsent(level) {
+      tracker.setConsent(level);
+      document.getElementById('current-consent').textContent = tracker.getConsent();
+      logMsg('Consent updated to: ' + level);
+    }
+
+    function trackCheckout() {
+      tracker.trackEvent('checkout_started', 'click', {
+        item_count: 3,
+        currency: 'USD',
+      });
+      logMsg('Tracked custom event: checkout_started');
+    }
+
+    function simulateSpaNav(newPath) {
+      window.history.pushState({}, '', newPath);
+      tracker.trackPageview(newPath);
+      logMsg('SPA Pageview recorded: ' + newPath);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: analytics-api-test
+  namespace: leave-tracker-2025
+  labels:
+    app: analytics-platform
+    environment: test
+    managed-by: gcloud
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      labels:
+        app: analytics-api-test
+        environment: test
+      annotations:
+        # Scale to zero when idle for minimal test environment costs
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/cloudsql-instances: "leave-tracker-2025:us-central1:analytics-pg16-test"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: "gen2"
+    spec:
+      serviceAccountName: sa-analytics-api-test@leave-tracker-2025.iam.gserviceaccount.com
+      containerConcurrency: 40
+      timeoutSeconds: 30
+      containers:
+        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-api-test:latest
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: "test"
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: BEHIND_PROXY
+              value: "true"
+            - name: TRUSTED_PROXIES
+              value: "169.254.8.1,169.254.169.254"
+            - name: POSTGRES_HOST
+              value: "/cloudsql/leave-tracker-2025:us-central1:analytics-pg16-test"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "analytics_test_db"
+            - name: POSTGRES_USER
+              value: "analytics_app"
+            - name: DB_POOL_MIN_SIZE
+              value: "1"
+            - name: DB_POOL_MAX_SIZE
+              value: "3"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-test-db-app-password
+                  key: latest
+            - name: ANALYTICS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-test-jwt-secret
+                  key: latest
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3

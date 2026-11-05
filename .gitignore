@@ -1,0 +1,175 @@
+# ==============================================================================
+# Analytics Platform — Comprehensive .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. AI Documents, Prompts, Directives & Generated Reports
+# ------------------------------------------------------------------------------
+# Prompts directory and prompt files
+prompts/
+**/prompts/
+*.prompt
+*.prompt.md
+
+# AI documentation, migration reports, reviews and task reports
+docs/ai/
+docs/adr/
+**/docs/ai/
+task-reports/
+**/task-reports/
+*TASK_REPORT*
+*task-report*
+templates/
+
+# AI agent instructions, rules and editor configuration
+AGENTS.md
+**/AGENTS.md
+CLAUDE.md
+**/CLAUDE.md
+.cursor/
+.cursorrules
+.windsurfrules
+.copilot/
+
+# ------------------------------------------------------------------------------
+# 2. Python Bytecode, Caches & Packaging Artifacts
+# ------------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.manifest
+*.spec
+
+# ------------------------------------------------------------------------------
+# 3. Python Virtual Environments
+# ------------------------------------------------------------------------------
+.venv/
+**/venv/
+venv/
+ENV/
+env/
+venv*/
+.venv*/
+
+# ------------------------------------------------------------------------------
+# 4. Testing, Code Coverage & Linting Caches
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.cache
+.mypy_cache/
+.ruff_cache/
+
+# ------------------------------------------------------------------------------
+# 5. Node.js & Frontend Dependencies & Build Caches
+# ------------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+.npm/
+.eslintcache
+.parcel-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# 6. Environment Variables, Secrets & Credentials
+# ------------------------------------------------------------------------------
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.secret
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+client_secret*.json
+service-account*.json
+*-credentials.json
+
+# Whitelist environment template examples
+!.env.example
+!infra/.env.example
+!integrations/python/env.example
+
+# ------------------------------------------------------------------------------
+# 7. Local Databases, Dumps, Backups & Logs
+# ------------------------------------------------------------------------------
+*.log
+logs/
+*.sqlite3
+*.sqlite
+*.db
+*.dump
+*.bak
+*.backup
+*.tmp
+tmp/
+temp/
+local_postgres_data/
+
+# Raw SQL dumps / archives
+*.sql
+*.sql.gz
+*.tar.gz
+!infra/init-db.sql
+!infra/gcp/init-production-db.sql
+
+# ------------------------------------------------------------------------------
+# 8. Operating System & IDE Artifacts
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ------------------------------------------------------------------------------
+# 9. Cloud SDK / Tooling Artifacts
+# ------------------------------------------------------------------------------
+.gcloud/
+
+# ------------------------------------------------------------------------------
+# 10. Local Operational & Client-Specific Verification Scripts
+# ------------------------------------------------------------------------------
+scripts/
+**/scripts/
+

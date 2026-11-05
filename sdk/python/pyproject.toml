@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "analytics-python"
+version = "0.1.0"
+description = "Lightweight, fail-open Python client and web framework middleware for the Analytics Platform."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Analytics Engineering Team" }
+]
+dependencies = [
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+fastapi = ["fastapi>=0.100.0", "starlette>=0.27.0"]
+flask = ["flask>=2.0.0"]
+all = ["fastapi>=0.100.0", "starlette>=0.27.0", "flask>=2.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["analytics*"]

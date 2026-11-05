@@ -1,0 +1,41 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: analytics-dash-test
+  namespace: leave-tracker-2025
+  labels:
+    app: analytics-platform
+    environment: test
+    managed-by: gcloud
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      labels:
+        app: analytics-dash-test
+        environment: test
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: "gen2"
+    spec:
+      serviceAccountName: sa-analytics-dash-test@leave-tracker-2025.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 15
+      containers:
+        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-dashboard-test:latest
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /dashboard/
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 20

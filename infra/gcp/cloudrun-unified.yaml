@@ -1,0 +1,77 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: analytics-platform
+  namespace: leave-tracker-2025
+  labels:
+    app: analytics-platform
+    environment: production
+    managed-by: gcloud
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      labels:
+        app: analytics-platform
+        environment: production
+      annotations:
+        # Scale to zero when idle: $0 compute cost during idle periods
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: "gen2"
+    spec:
+      serviceAccountName: sa-analytics-platform@leave-tracker-2025.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-platform:20261105-p19-dashboard-improvements
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: BEHIND_PROXY
+              value: "true"
+            - name: TRUSTED_PROXIES
+              value: "169.254.8.1,169.254.169.254"
+            - name: GCP_PROJECT_ID
+              value: "leave-tracker-2025"
+            - name: FIRESTORE_DATABASE
+              value: "(default)"
+            - name: FIRESTORE_COLLECTION_PREFIX
+              value: "analytics_"
+            # Administrative JWT Secret Key
+            - name: ANALYTICS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-jwt-secret
+                  key: latest
+            # Google Sign-In OpenID Connect Configuration
+            - name: GOOGLE_CLIENT_ID
+              # Web client first: /auth/config exposes it to Google Identity Services.
+              # Retain the existing Cloud SDK audience for approved CLI authentication.
+              value: "427212681311-7dbgdroclks4gi1b7guitu79iiob1cat.apps.googleusercontent.com,32555940559.apps.googleusercontent.com"
+            - name: GOOGLE_INITIAL_ADMIN_EMAIL
+              value: "pranesh.sharma@gmail.com"
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 3

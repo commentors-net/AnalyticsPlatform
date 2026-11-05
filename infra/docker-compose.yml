@@ -1,0 +1,66 @@
+services:
+  analytics-postgres:
+    image: postgres:16
+    container_name: analytics-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: analytics_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-analytics_dev_password}
+    ports:
+      - "5433:5432"
+    volumes:
+      - analytics_pg_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d analytics_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  analytics-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: analytics-api
+    restart: unless-stopped
+    depends_on:
+      analytics-postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: local
+      POSTGRES_HOST: analytics-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: analytics_db
+      POSTGRES_USER: analytics_app
+      POSTGRES_PASSWORD: analytics_app_local_dev
+      ANALYTICS_JWT_SECRET: ${ANALYTICS_JWT_SECRET:-dev-super-secret-jwt-key-minimum-32-characters-long}
+      TRUSTED_PROXIES: "*"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  analytics-dashboard:
+    build:
+      context: ..
+      dockerfile: dashboard/Dockerfile
+    container_name: analytics-dashboard
+    restart: unless-stopped
+    depends_on:
+      analytics-api:
+        condition: service_started
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/dashboard/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  analytics_pg_data:
+    name: analytics_pg_data

@@ -1,0 +1,90 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: analytics-api
+  namespace: leave-tracker-2025
+  labels:
+    app: analytics-platform
+    environment: production
+    managed-by: terraform-or-gcloud
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      labels:
+        app: analytics-api
+        environment: production
+      annotations:
+        # Scale to zero when idle, cap max scale at 10 to bound database connection pool
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        # Connect to Cloud SQL via native Unix Domain Socket (eliminates VPC connector cost)
+        run.googleapis.com/cloudsql-instances: "leave-tracker-2025:us-central1:analytics-pg16"
+        # CPU allocation: CPU is allocated only during request processing
+        run.googleapis.com/cpu-throttling: "true"
+        # Execute under dedicated least-privilege service account (COND-03 / Security Gate G1)
+        # NEVER use the Default Compute Service Account
+        run.googleapis.com/execution-environment: "gen2"
+    spec:
+      serviceAccountName: sa-analytics-api@leave-tracker-2025.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-api:v1.0.0
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: BEHIND_PROXY
+              value: "true"
+            - name: POSTGRES_HOST
+              value: "/cloudsql/leave-tracker-2025:us-central1:analytics-pg16"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "analytics_db"
+            - name: POSTGRES_USER
+              value: "analytics_app"
+            - name: DB_POOL_MIN_SIZE
+              value: "2"
+            - name: DB_POOL_MAX_SIZE
+              value: "5"
+            - name: DB_POOL_TIMEOUT_SECONDS
+              value: "10.0"
+            - name: RATE_LIMIT_PER_IP_MINUTE
+              value: "120"
+            - name: RATE_LIMIT_PER_KEY_MINUTE
+              value: "2000"
+            # Secrets loaded directly from Google Cloud Secret Manager
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-db-password
+                  key: latest
+            - name: ANALYTICS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-jwt-secret
+                  key: latest
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            periodSeconds: 15
+            failureThreshold: 3

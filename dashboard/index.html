@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics Platform Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="login-container" class="center-card">
+    <div class="card login-card">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        <h2>Analytics Platform</h2>
+      </div>
+      <p class="subtitle">Administrative Portal — Google Sign-In</p>
+      <p class="auth-notice">Dashboard access is strictly restricted to explicitly approved Google accounts.</p>
+
+      <div id="g-signin-box" class="google-signin-wrapper">
+        <div id="google-btn-target"></div>
+      </div>
+
+      <div id="login-error" class="error-msg hidden"></div>
+
+      <!-- Collapsible Manual Token Input for Verification & Local Testing -->
+      <details class="dev-token-details">
+        <summary>Direct Token / Testing Mode</summary>
+        <div class="dev-token-form">
+          <label for="manual-id-token">Google ID Token</label>
+          <textarea id="manual-id-token" rows="3" placeholder="Paste Google ID token (or gcloud auth print-identity-token)"></textarea>
+          <button type="button" id="btn-manual-token" class="btn btn-secondary btn-sm">Authenticate with Token</button>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Dashboard Main Layout -->
+  <div id="dashboard-container" class="hidden">
+    <!-- Top Navigation Bar -->
+    <header class="top-header">
+      <div class="header-left">
+        <div class="brand-small">
+          <svg class="brand-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          <span class="platform-title">Analytics Platform</span>
+        </div>
+        <!-- Application Selector -->
+        <select id="app-selector" class="select-input"></select>
+      </div>
+
+      <div class="header-center">
+        <!-- Environment Toggle -->
+        <div class="env-toggle">
+          <button id="env-live" class="env-btn active" data-env="live">
+            <span class="dot dot-live"></span> LIVE
+          </button>
+          <button id="env-test" class="env-btn" data-env="test">
+            <span class="dot dot-test"></span> TEST
+          </button>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Date Range Filter -->
+        <select id="date-range-filter" class="select-input">
+          <option value="today">Today (24h)</option>
+          <option value="7d" selected>Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="90d">Last 90 Days</option>
+        </select>
+        <button id="btn-export-csv" class="btn btn-secondary btn-sm" title="Export CSV">Export</button>
+        <div class="user-menu">
+          <span id="user-display" class="user-email"></span>
+          <button id="btn-logout" class="btn btn-outline btn-sm">Logout</button>
+        </div>
+      </div>
+    </header>
+    <nav class="section-nav" aria-label="Platform sections">
+      <button id="nav-analytics" type="button" class="btn btn-secondary" aria-current="page" aria-controls="analytics-view">Analytics</button>
+      <button id="nav-applications" type="button" class="btn btn-outline" aria-controls="application-management">Applications</button>
+    </nav>
+
+    <!-- Environment Notice (for TEST mode) -->
+    <div id="test-banner" class="test-banner hidden">
+      ⚠️ <strong>TEST ENVIRONMENT ACTIVE</strong> — Viewing isolated synthetic sandbox data.
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="dashboard-body">
+      <section id="application-management" class="card hidden" aria-label="Application management">
+        <div class="card-header"><h3>Applications</h3><button id="app-add" class="btn btn-primary btn-sm hidden" type="button">Add application</button></div>
+        <p id="app-message" role="status" aria-live="polite"></p>
+        <div class="table-scroll"><table class="data-table">
+          <thead><tr><th>Name / identifier</th><th>Status</th><th>LIVE websites</th><th>TEST websites</th><th>Actions</th></tr></thead>
+          <tbody id="application-rows"></tbody>
+        </table></div>
+        <form id="app-form" class="management-form hidden">
+          <h4 id="app-form-title">Add application</h4>
+          <div class="form-grid">
+            <div class="form-group"><label for="app-name">Application name</label><input id="app-name" required maxlength="255" autocomplete="off"></div>
+            <div class="form-group"><label for="app-id">Identifier</label><input id="app-id" required minlength="3" maxlength="64" pattern="[a-z0-9_-]+" autocomplete="off"><small>Lowercase letters, numbers, hyphens and underscores. Fixed after registration.</small></div>
+            <div class="form-group"><label for="app-classification">Application classification</label><select id="app-classification" class="select-input"><option value="UNCLASSIFIED">Unclassified</option><option value="REAL">Real application</option><option value="SAMPLE">Sample / test application</option></select><small>Explicitly declared. A TEST key or a name alone does not establish that an app is a sample.</small></div>
+            <div class="form-group"><label for="app-live-origins">Authorized LIVE websites</label><textarea id="app-live-origins" required maxlength="8192" rows="3" placeholder="https://example.com"></textarea></div>
+            <div class="form-group"><label for="app-test-origins">Authorized TEST websites</label><textarea id="app-test-origins" required maxlength="8192" rows="3" placeholder="https://test.example.com"></textarea></div>
+          </div>
+          <p class="management-help">One HTTPS origin per line, without a page path. LIVE and TEST browser origins are matched separately and exactly.</p>
+          <div class="action-row"><button id="app-save" class="btn btn-primary" type="submit">Save application</button><button id="app-preset" class="btn btn-secondary" type="button">Use AskAnna settings</button><button id="app-cancel" class="btn btn-outline" type="button">Cancel</button></div>
+        </form>
+        <section id="app-delete-panel" class="management-form hidden" aria-label="Permanent deletion confirmation">
+          <h4 id="app-delete-title">Permanent deletion</h4>
+          <p id="app-delete-notice"></p>
+          <pre id="app-delete-impact"></pre>
+          <p id="app-delete-retained" class="management-help"></p>
+          <p id="app-delete-message" role="status" aria-live="polite"></p>
+          <form id="app-delete-form">
+            <label id="app-delete-label" for="app-delete-confirmation">Type the application identifier to confirm</label>
+            <input id="app-delete-confirmation" required autocomplete="off" maxlength="64">
+            <div class="action-row"><button id="app-delete-submit" type="submit" class="btn btn-danger" disabled>Delete permanently</button><button id="app-delete-cancel" type="button" class="btn btn-outline">Cancel</button></div>
+          </form>
+        </section>
+        <section id="key-panel" class="management-form hidden" aria-label="Collection keys">
+          <div class="card-header"><h4 id="key-title">Collection keys</h4><button id="key-close" class="btn btn-outline btn-sm" type="button">Close keys</button></div>
+          <div class="action-row" role="group" aria-label="Key environment"><button id="keys-live" class="btn btn-secondary" type="button" aria-pressed="true">LIVE keys</button><button id="keys-test" class="btn btn-outline" type="button" aria-pressed="false">TEST keys</button></div>
+          <p id="key-environment-label" class="management-help"></p>
+          <p id="key-message" role="status" aria-live="polite"></p>
+          <form id="key-form" class="action-row"><label for="key-name">Key name</label><input id="key-name" required maxlength="255" autocomplete="off" placeholder="Website collection"><button id="key-generate" class="btn btn-primary" type="submit">Generate key</button></form>
+          <div id="key-once" class="key-once hidden" role="region" aria-label="New collection key">
+            <p id="key-once-label"></p><p>Copy this key now. It will not be shown again.</p>
+            <pre id="key-value"></pre>
+            <div class="action-row"><button id="key-copy" class="btn btn-secondary" type="button">Copy key</button><button id="key-dismiss" class="btn btn-outline" type="button">I have saved it</button></div>
+          </div>
+          <div class="table-scroll"><table class="data-table"><thead><tr><th>Name</th><th>Prefix</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="key-rows"></tbody></table></div>
+        </section>
+      </section>
+      <section id="analytics-view" class="analytics-content" aria-label="Analytics dashboard">
+      <p id="application-empty" class="card hidden">No active applications. Open Applications to register or manage an application.</p>
+      <div id="analytics-content" class="analytics-content">
+      <!-- KPI Metric Cards -->
+      <section class="kpi-grid">
+        <div class="card kpi-card">
+          <span class="kpi-label">Pageviews</span>
+          <div class="kpi-value-row">
+            <span id="kpi-pageviews" class="kpi-value">0</span>
+            <span id="kpi-pageviews-delta" class="kpi-delta">+0%</span>
+          </div>
+          <span class="kpi-sub">vs. previous period</span>
+        </div>
+
+        <div class="card kpi-card">
+          <span class="kpi-label">Unique Visitors</span>
+          <div class="kpi-value-row">
+            <span id="kpi-visitors" class="kpi-value">0</span>
+            <span id="kpi-visitors-delta" class="kpi-delta">+0%</span>
+          </div>
+          <span class="kpi-sub">consented pseudonymous</span>
+        </div>
+
+        <div class="card kpi-card">
+          <span class="kpi-label">Total Sessions</span>
+          <div class="kpi-value-row">
+            <span id="kpi-sessions" class="kpi-value">0</span>
+            <span id="kpi-sessions-delta" class="kpi-delta">+0%</span>
+          </div>
+          <span class="kpi-sub">30-min idle window</span>
+        </div>
+
+        <div class="card kpi-card">
+          <span class="kpi-label">Bounce Rate</span>
+          <div class="kpi-value-row">
+            <span id="kpi-bounce" class="kpi-value">0%</span>
+            <span id="kpi-bounce-delta" class="kpi-delta">0%</span>
+          </div>
+          <span class="kpi-sub">single-page visits</span>
+        </div>
+
+        <div class="card kpi-card">
+          <span class="kpi-label">Avg. Duration</span>
+          <div class="kpi-value-row">
+            <span id="kpi-duration" class="kpi-value">0s</span>
+            <span id="kpi-duration-delta" class="kpi-delta">+0%</span>
+          </div>
+          <span class="kpi-sub">active engagement</span>
+        </div>
+      </section>
+
+      <!-- Timeseries Chart Section -->
+      <section class="card chart-card">
+        <div class="card-header">
+          <h3>Traffic Trends</h3>
+          <span id="chart-range-label" class="badge">Last 7 Days</span>
+        </div>
+        <div id="timeseries-chart-container" class="chart-container">
+          <svg id="trend-svg" class="trend-chart" preserveAspectRatio="none"></svg>
+        </div>
+      </section>
+
+      <!-- Tabbed / Split Analytics Breakdown -->
+      <section class="split-grid">
+        <!-- Top Pages Table -->
+        <div class="card table-card">
+          <div class="card-header">
+            <h3>Top Pages</h3>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Page Path</th>
+                <th class="num">Views</th>
+                <th class="num">Visitors</th>
+                <th class="num">Avg Time</th>
+              </tr>
+            </thead>
+            <tbody id="pages-table-body">
+              <tr><td colspan="4" class="empty">No pageview data recorded</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Referrers Table -->
+        <div class="card table-card">
+          <div class="card-header">
+            <h3>Top Referrers</h3>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Referrer Source</th>
+                <th class="num">Views</th>
+                <th class="num">Visitors</th>
+              </tr>
+            </thead>
+            <tbody id="referrers-table-body">
+              <tr><td colspan="3" class="empty">No referral data recorded</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="split-grid">
+        <!-- Devices & Browsers -->
+        <div class="card">
+          <div class="card-header">
+            <h3>Devices & Browsers</h3>
+          </div>
+          <div class="breakdown-grid">
+            <div class="breakdown-col">
+              <h4>Devices</h4>
+              <ul id="device-list" class="bar-list"></ul>
+            </div>
+            <div class="breakdown-col">
+              <h4>Browsers</h4>
+              <ul id="browser-list" class="bar-list"></ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Geolocation Breakdown -->
+        <div class="card table-card">
+          <div class="card-header">
+            <h3>Approximate Geography</h3>
+          </div>
+          <p class="management-help">Unknown means no verified location is available. Synthetic or server-sent events do not establish a visitor's geography.</p>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Country</th>
+                <th>City</th>
+                <th class="num">Visitors</th>
+                <th class="num">Views</th>
+              </tr>
+            </thead>
+            <tbody id="geo-table-body">
+              <tr><td colspan="4" class="empty">No location data recorded</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Real-Time Activity Feed -->
+      <section class="card">
+        <div class="card-header">
+          <h3>Recent Ingested Events</h3>
+          <span class="badge badge-live">Live Stream (Last 50)</span>
+        </div>
+        <p class="management-help">Details show approved technical fields. Identifiers, query strings and some paths are hidden for privacy.</p>
+        <div class="recent-events-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>Type</th>
+                <th>Name / Action</th>
+                <th>Page Path</th>
+                <th>Reported source</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="recent-table-body">
+              <tr><td colspan="6" class="empty">No recent events recorded</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/dashboard/applications.js"></script>
+  <script src="/dashboard/app.js"></script>
+</body>
+</html>
