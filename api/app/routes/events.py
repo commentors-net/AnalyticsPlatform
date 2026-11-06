@@ -3,7 +3,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 
 from api.app.core.config import settings
@@ -18,8 +18,9 @@ from api.app.schemas.event import (
 from api.app.services.bot_detector import classify_user_agent
 from api.app.services.geoip import mask_ip_address, resolve_coarse_geoip
 from api.app.services.proxy import extract_client_ip
-from api.app.services.sanitizer import extract_referrer_domain, sanitize_url_path
+from api.app.services.sanitizer import classify_referrer, extract_referrer_domain, sanitize_url_path
 from api.app.services.firestore_repo import FirestoreRepo, get_repo
+import re
 
 router = APIRouter(tags=["Ingestion"])
 
@@ -29,6 +30,116 @@ def _persist_event(repo, **kwargs):
         return repo.claim_and_ingest_event(**kwargs)
     except ValueError:
         raise HTTPException(status_code=409, detail="Application changed or deletion started; event was not accepted")
+
+
+BROWSER_NORMALIZATION = {
+    "chrome": "Chrome",
+    "firefox": "Firefox",
+    "safari": "Safari",
+    "edge": "Edge",
+    "opera": "Opera",
+    "mobile safari": "Mobile Safari",
+    "chrome mobile": "Chrome Mobile",
+    "other": "Other",
+    "unknown": "unknown",
+}
+
+REFERRER_CAT_MAP = {
+    "direct": "Direct / None",
+    "search": "Search",
+    "social": "Social",
+    "internal": "Internal",
+    "other": "Referral",
+    "referral": "Referral",
+    "direct / none": "Direct / None",
+}
+
+
+def _resolve_device_family(item: SingleEventSchema, default_device: Optional[str]) -> Optional[str]:
+    raw_device = (
+        item.device_family
+        or getattr(item, "client_device", None)
+        or (item.metadata.get("client_device") if isinstance(item.metadata, dict) else None)
+        or (item.metadata.get("device_family") if isinstance(item.metadata, dict) else None)
+    )
+    if raw_device:
+        dev_str = str(raw_device).lower().strip()
+        allowed = {"desktop", "mobile", "tablet", "bot", "unknown"}
+        return dev_str if dev_str in allowed else "Other"
+    return default_device
+
+
+def _resolve_browser_family(item: SingleEventSchema, default_browser: Optional[str]) -> Optional[str]:
+    raw_browser = (
+        item.browser_family
+        or getattr(item, "client_browser", None)
+        or (item.metadata.get("client_browser") if isinstance(item.metadata, dict) else None)
+        or (item.metadata.get("browser_family") if isinstance(item.metadata, dict) else None)
+    )
+    if raw_browser:
+        norm = BROWSER_NORMALIZATION.get(str(raw_browser).lower().strip())
+        if norm:
+            return norm
+    return default_browser
+
+
+def _resolve_referrer_category(item: SingleEventSchema, ref_domain: Optional[str], allowed_origins: Optional[str]) -> str:
+    ref_cat = classify_referrer(ref_domain, allowed_origins)
+    raw_cat = (
+        getattr(item, "referrer_category", None)
+        or (item.metadata.get("referrer_category") if isinstance(item.metadata, dict) else None)
+    )
+    if raw_cat:
+        cat_clean = str(raw_cat).lower().strip()
+        if cat_clean in REFERRER_CAT_MAP:
+            return REFERRER_CAT_MAP[cat_clean]
+    return ref_cat
+
+
+def _resolve_geography(
+    item: SingleEventSchema,
+    client_ip: Optional[str],
+    request: Request,
+    is_browser_call: bool,
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    country_code = None
+    geo_source = None
+    region_code = None
+    city_name = None
+
+    # Untrusted browser calls (CORS with Origin, or browser source) cannot claim verified geography
+    if not is_browser_call:
+        raw_country = (
+            item.country_code
+            or getattr(item, "client_country", None)
+            or (item.metadata.get("client_country") if isinstance(item.metadata, dict) else None)
+            or (item.metadata.get("country_code") if isinstance(item.metadata, dict) else None)
+        )
+        if raw_country:
+            candidate = str(raw_country).strip().upper()
+            if re.fullmatch(r"[A-Z]{2}", candidate) and candidate not in ("LO", "ZZ", "XX"):
+                country_code = candidate
+                geo_source = "trusted_edge_or_client"
+
+        if not country_code:
+            # Genuine edge proxy headers (cf-ipcountry from Cloudflare, x-appengine-country from GCP)
+            for header_name in ("cf-ipcountry", "x-appengine-country"):
+                hdr_val = request.headers.get(header_name)
+                if hdr_val:
+                    candidate = hdr_val.strip().upper()
+                    if re.fullmatch(r"[A-Z]{2}", candidate) and candidate not in ("LO", "ZZ", "XX"):
+                        country_code = candidate
+                        geo_source = "trusted_edge_or_client"
+                        break
+
+    if not country_code:
+        country_code, region_code, city_name = resolve_coarse_geoip(client_ip)
+        if country_code:
+            geo_source = "verified_coarse_lookup"
+    else:
+        region_code, city_name = None, None
+
+    return country_code, region_code, city_name, geo_source
 
 
 @router.options("/v1/{path:path}")
@@ -155,19 +266,41 @@ async def ingest_event(
         )
 
     # 5. User-Agent / Bot Classification
-    ua_str = request.headers.get("user-agent")
-    is_bot, bot_name, browser_family, os_family, device_family = classify_user_agent(ua_str)
+    forwarded_ua = payload.user_agent or (payload.metadata.get("user_agent") if isinstance(payload.metadata, dict) else None)
+    effective_ua = forwarded_ua or request.headers.get("user-agent")
+    is_bot, bot_name, browser_family, os_family, device_family = classify_user_agent(effective_ua)
 
-    # 6. GeoIP & Sanitization
-    country_code, region_code, city_name = resolve_coarse_geoip(client_ip)
+    is_browser_call = bool(origin) or (getattr(payload, "source", None) == "browser") or (isinstance(payload.metadata, dict) and payload.metadata.get("source") == "browser")
+    device_family = _resolve_device_family(payload, device_family)
+    browser_family = _resolve_browser_family(payload, browser_family)
+    if payload.os_family:
+        os_family = payload.os_family
+
+    country_code, region_code, city_name, geo_source = _resolve_geography(
+        payload, client_ip, request, is_browser_call
+    )
+
     clean_path = sanitize_url_path(payload.page_path)
     ref_domain = extract_referrer_domain(payload.referrer)
+    ref_cat = _resolve_referrer_category(payload, ref_domain, getattr(api_key.application, "allowed_origins", None))
 
     event_timestamp = payload.timestamp or datetime.now(timezone.utc)
     event_id = payload.event_id or uuid.uuid4()
     event_id_str = str(event_id)
 
+    # 7. Source Mapping
+    source = payload.source or (payload.metadata.get("source") if isinstance(payload.metadata, dict) else None)
+    if not source:
+        raw_ua = (request.headers.get("user-agent") or "").lower()
+        if "python" in raw_ua or "httpx" in raw_ua or "aiohttp" in raw_ua or (isinstance(payload.metadata, dict) and "method" in payload.metadata):
+            source = "python"
+        elif request.headers.get("origin") or (effective_ua and ("mozilla" in effective_ua.lower() or "chrome" in effective_ua.lower())):
+            source = "browser"
+        else:
+            source = "server"
+
     metadata = dict(payload.metadata) if payload.metadata else {}
+    metadata["source"] = source
     if is_bot:
         metadata["is_bot"] = True
         metadata["bot_name"] = bot_name
@@ -182,12 +315,15 @@ async def ingest_event(
         "session_id": payload.session_id,
         "page_path": clean_path,
         "referrer_domain": ref_domain,
+        "referrer_category": ref_cat,
+        "source": source,
         "device_family": device_family,
         "os_family": os_family,
         "browser_family": browser_family,
         "country_code": country_code,
         "region_code": region_code,
         "city_name": city_name,
+        "geo_source": geo_source,
         "ip_masked": masked_ip,
         "duration_ms": payload.duration_ms,
         "consent_status": getattr(payload, "consent_status", "ANALYTICS_ALLOWED" if payload.visitor_id else "NO_STORAGE"),
@@ -197,14 +333,19 @@ async def ingest_event(
     }
 
     is_pv = 1 if str(event_data["event_type"]).lower() == "pageview" else 0
+    duration_sec = max(0, (payload.duration_ms or 0) // 1000)
     session_data = {
         "session_id": payload.session_id or f"sess_{uuid.uuid4().hex[:12]}",
         "visitor_id": payload.visitor_id,
         "started_at": event_timestamp.isoformat(),
         "pageviews_count": is_pv,
+        "duration_seconds": duration_sec,
+        "event_type": event_data["event_type"],
         "entry_page": clean_path,
         "referrer_domain": ref_domain,
+        "referrer_category": ref_cat,
         "country_code": country_code,
+        "geo_source": geo_source,
         "device_family": device_family,
     }
 
@@ -277,10 +418,9 @@ async def ingest_batch(
             detail="Request origin not authorized for this application",
         )
 
-    # 5. User-Agent / Bot Classification
-    ua_str = request.headers.get("user-agent")
-    is_bot, bot_name, browser_family, os_family, device_family = classify_user_agent(ua_str)
-    country_code, region_code, city_name = resolve_coarse_geoip(client_ip)
+    # 5. User-Agent / Bot Classification fallback
+    req_ua = request.headers.get("user-agent")
+    is_browser_call = bool(origin)
 
     persisted_ids: List[uuid.UUID] = []
 
@@ -289,9 +429,38 @@ async def ingest_batch(
         event_id_str = str(event_id)
         clean_path = sanitize_url_path(item.page_path)
         ref_domain = extract_referrer_domain(item.referrer)
+        ref_cat = _resolve_referrer_category(item, ref_domain, getattr(api_key.application, "allowed_origins", None))
         event_timestamp = item.timestamp or datetime.now(timezone.utc)
 
+        # User agent resolution
+        forwarded_ua = item.user_agent or (item.metadata.get("user_agent") if isinstance(item.metadata, dict) else None)
+        effective_ua = forwarded_ua or req_ua
+        is_bot, bot_name, browser_family, os_family, device_family = classify_user_agent(effective_ua)
+
+        item_is_browser = is_browser_call or (getattr(item, "source", None) == "browser") or (isinstance(item.metadata, dict) and item.metadata.get("source") == "browser")
+        device_family = _resolve_device_family(item, device_family)
+        browser_family = _resolve_browser_family(item, browser_family)
+        if item.os_family:
+            os_family = item.os_family
+
+        # Country & Geography resolution
+        country_code, region_code, city_name, geo_source = _resolve_geography(
+            item, client_ip, request, item_is_browser
+        )
+
+        # Source resolution
+        source = item.source or (item.metadata.get("source") if isinstance(item.metadata, dict) else None)
+        if not source:
+            raw_ua = (req_ua or "").lower()
+            if "python" in raw_ua or "httpx" in raw_ua or "aiohttp" in raw_ua or (isinstance(item.metadata, dict) and "method" in item.metadata):
+                source = "python"
+            elif request.headers.get("origin") or (effective_ua and ("mozilla" in effective_ua.lower() or "chrome" in effective_ua.lower())):
+                source = "browser"
+            else:
+                source = "server"
+
         metadata = dict(item.metadata) if item.metadata else {}
+        metadata["source"] = source
         if is_bot:
             metadata["is_bot"] = True
             metadata["bot_name"] = bot_name
@@ -306,12 +475,15 @@ async def ingest_batch(
             "session_id": item.session_id,
             "page_path": clean_path,
             "referrer_domain": ref_domain,
+            "referrer_category": ref_cat,
+            "source": source,
             "device_family": device_family,
             "os_family": os_family,
             "browser_family": browser_family,
             "country_code": country_code,
             "region_code": region_code,
             "city_name": city_name,
+            "geo_source": geo_source,
             "ip_masked": masked_ip,
             "duration_ms": item.duration_ms,
             "consent_status": getattr(item, "consent_status", "ANALYTICS_ALLOWED" if item.visitor_id else "NO_STORAGE"),
@@ -321,14 +493,19 @@ async def ingest_batch(
         }
 
         is_pv = 1 if str(event_data["event_type"]).lower() == "pageview" else 0
+        duration_sec = max(0, (item.duration_ms or 0) // 1000)
         session_data = {
             "session_id": item.session_id or f"sess_{uuid.uuid4().hex[:12]}",
             "visitor_id": item.visitor_id,
             "started_at": event_timestamp.isoformat(),
             "pageviews_count": is_pv,
+            "duration_seconds": duration_sec,
+            "event_type": event_data["event_type"],
             "entry_page": clean_path,
             "referrer_domain": ref_domain,
+            "referrer_category": ref_cat,
             "country_code": country_code,
+            "geo_source": geo_source,
             "device_family": device_family,
         }
 

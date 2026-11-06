@@ -17,6 +17,7 @@ from api.app.core.config import settings
 from api.app.core.firestore_db import firestore_db, FirestoreDB
 from api.app.core.security import get_password_hash
 from api.app.services.dashboard_safety import geography
+from api.app.services.sanitizer import classify_referrer
 
 logger = logging.getLogger("analytics_platform.repo")
 
@@ -415,6 +416,10 @@ class FirestoreRepo:
         event_ts = _parse_iso(session_data.get("started_at"))
         is_pageview = int(session_data.get("pageviews_count") or 0)
         page_path = session_data.get("entry_page") or "/"
+        reported_dur = int(session_data.get("duration_seconds") or 0)
+
+        # Single-page website engagement: engaged (non-bounce) if duration >= 10s or pageviews > 1
+        initial_bounce = False if (reported_dur >= 10 or is_pageview > 1) else True
 
         if not snap.exists:
             record = {
@@ -424,13 +429,16 @@ class FirestoreRepo:
                 "visitor_id": session_data.get("visitor_id"),
                 "started_at": event_ts.isoformat(),
                 "ended_at": event_ts.isoformat(),
-                "duration_seconds": 0,
+                "duration_seconds": reported_dur,
                 "pageviews_count": is_pageview,
+                "events_count": 1,
                 "entry_page": page_path,
                 "exit_page": page_path,
-                "is_bounce": True,
+                "is_bounce": initial_bounce,
                 "referrer_domain": session_data.get("referrer_domain"),
+                "referrer_category": session_data.get("referrer_category"),
                 "country_code": session_data.get("country_code"),
+                "geo_source": session_data.get("geo_source"),
                 "device_family": session_data.get("device_family"),
                 "created_at": _iso_now(),
                 "updated_at": _iso_now(),
@@ -443,8 +451,11 @@ class FirestoreRepo:
 
             new_start = min(ex_start, event_ts)
             new_end = max(ex_end, event_ts)
-            duration_sec = max(0, int((new_end - new_start).total_seconds()))
+            ts_delta = max(0, int((new_end - new_start).total_seconds()))
+            ex_dur = int(existing.get("duration_seconds", 0) or 0)
+            duration_sec = max(ex_dur, ts_delta, reported_dur)
             new_pv = existing.get("pageviews_count", 0) + is_pageview
+            new_events = existing.get("events_count", 1) + 1
             is_bounce = new_pv <= 1
 
             updates = {
@@ -452,9 +463,13 @@ class FirestoreRepo:
                 "ended_at": new_end.isoformat(),
                 "duration_seconds": duration_sec,
                 "pageviews_count": new_pv,
+                "events_count": new_events,
                 "is_bounce": is_bounce,
                 "updated_at": _iso_now(),
             }
+            if session_data.get("country_code") and not existing.get("country_code"):
+                updates["country_code"] = session_data.get("country_code")
+                updates["geo_source"] = session_data.get("geo_source")
             if event_ts < ex_start:
                 updates["entry_page"] = page_path
                 if session_data.get("referrer_domain"):
@@ -516,31 +531,52 @@ class FirestoreRepo:
 
         def _compute(events: List[Dict[str, Any]], sessions: List[Dict[str, Any]]):
             pvs = sum(1 for e in events if str(e.get("event_type", "")).lower() == "pageview")
+
+            # Unique visitors: when approved anonymous identifiers are supplied
+            has_visitors = any(bool(e.get("visitor_id")) for e in events)
             visitors = len({e.get("visitor_id") for e in events if e.get("visitor_id")})
+            vis_available = has_visitors if len(events) > 0 else True
+
+            # Sessions: client-tracked when session_id or visitor_id was provided
+            has_explicit_sessions = any(bool(e.get("session_id")) or bool(e.get("visitor_id")) for e in events)
             sess_count = len(sessions)
-            bounces = sum(1 for s in sessions if s.get("is_bounce") is True)
+            sess_available = has_explicit_sessions if len(events) > 0 else True
+
+            bounces = sum(1 for s in sessions if (s.get("is_bounce") is True and s.get("duration_seconds", 0) < 10))
             bounce_rate = round((bounces / sess_count * 100.0), 1) if sess_count > 0 else 0.0
             avg_dur = round(sum(s.get("duration_seconds", 0) for s in sessions) / sess_count, 1) if sess_count > 0 else 0.0
-            return pvs, visitors, sess_count, bounce_rate, avg_dur
+            return pvs, visitors, vis_available, sess_count, sess_available, bounce_rate, avg_dur
 
-        cpv, cvis, cses, cbr, cdur = _compute(curr_events, curr_sessions)
-        ppv, pvis, pses, pbr, pdur = _compute(prev_events, prev_sessions)
+        cpv, cvis, cvis_avail, cses, cses_avail, cbr, cdur = _compute(curr_events, curr_sessions)
+        ppv, pvis, pvis_avail, pses, pses_avail, pbr, pdur = _compute(prev_events, prev_sessions)
 
         def _pct(c: float, p: float) -> float:
             if p == 0:
                 return 100.0 if c > 0 else 0.0
             return round(((c - p) / p) * 100.0, 1)
 
+        app_doc = self.get_app(app_id) or {}
+        classification = app_doc.get("classification", "UNCLASSIFIED")
+        if environment == "test":
+            data_status = "test"
+        elif classification == "SAMPLE":
+            data_status = "sample"
+        elif classification == "REAL":
+            data_status = "live"
+        else:
+            data_status = "unclassified"
+
         return {
             "app_id": app_id,
             "environment": environment,
             "start_date": start_dt.isoformat(),
             "end_date": end_dt.isoformat(),
-            "pageviews": {"value": float(cpv), "previous_value": float(ppv), "change_pct": _pct(cpv, ppv)},
-            "visitors": {"value": float(cvis), "previous_value": float(pvis), "change_pct": _pct(cvis, pvis)},
-            "sessions": {"value": float(cses), "previous_value": float(pses), "change_pct": _pct(cses, pses)},
-            "bounce_rate": {"value": float(cbr), "previous_value": float(pbr), "change_pct": _pct(cbr, pbr)},
-            "avg_duration_sec": {"value": float(cdur), "previous_value": float(pdur), "change_pct": _pct(cdur, pdur)},
+            "data_status": data_status,
+            "pageviews": {"value": float(cpv), "previous_value": float(ppv), "change_pct": _pct(cpv, ppv), "available": True},
+            "visitors": {"value": float(cvis), "previous_value": float(pvis), "change_pct": _pct(cvis, pvis), "available": cvis_avail},
+            "sessions": {"value": float(cses), "previous_value": float(pses), "change_pct": _pct(cses, pses), "available": cses_avail},
+            "bounce_rate": {"value": float(cbr), "previous_value": float(pbr), "change_pct": _pct(cbr, pbr), "available": cses_avail},
+            "avg_duration_sec": {"value": float(cdur), "previous_value": float(pdur), "change_pct": _pct(cdur, pdur), "available": cses_avail},
         }
 
     def get_timeseries_metrics(
@@ -550,10 +586,31 @@ class FirestoreRepo:
         interval: str,
         start_dt: datetime,
         end_dt: datetime,
+        fill_sparse: bool = True,
     ) -> List[Dict[str, Any]]:
         events, _ = self._fetch_window_data(app_id, environment, start_dt, end_dt)
 
         buckets: Dict[str, Dict[str, Any]] = {}
+        s_utc = start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=timezone.utc)
+        e_utc = end_dt if end_dt.tzinfo else end_dt.replace(tzinfo=timezone.utc)
+
+        # Pre-populate contiguous intervals for complete timeline and sparse-data support
+        if fill_sparse:
+            if interval == "hour":
+                curr = s_utc.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+                bound = e_utc.astimezone(timezone.utc)
+                while curr <= bound:
+                    bucket_key = curr.strftime("%Y-%m-%dT%H:00:00+00:00")
+                    buckets[bucket_key] = {"pageviews": 0, "sessions": set(), "visitors": set()}
+                    curr += timedelta(hours=1)
+            else:
+                curr = s_utc.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                bound = e_utc.astimezone(timezone.utc)
+                while curr <= bound:
+                    bucket_key = curr.strftime("%Y-%m-%dT00:00:00+00:00")
+                    buckets[bucket_key] = {"pageviews": 0, "sessions": set(), "visitors": set()}
+                    curr += timedelta(days=1)
+
         for e in events:
             ts = _parse_iso(e.get("timestamp"))
             if interval == "hour":
@@ -605,7 +662,7 @@ class FirestoreRepo:
         for s in sessions:
             entry = s.get("entry_page") or "/"
             if entry in pages:
-                if s.get("is_bounce"):
+                if s.get("is_bounce") and (s.get("duration_seconds", 0) < 10):
                     pages[entry]["bounces"] += 1
                 pages[entry]["durations"].append(s.get("duration_seconds", 0))
 
@@ -639,11 +696,17 @@ class FirestoreRepo:
     ) -> List[Dict[str, Any]]:
         events, _ = self._fetch_window_data(app_id, environment, start_dt, end_dt)
 
+        app_doc = self.get_app(app_id) or {}
+        allowed_origins = app_doc.get("allowed_origins")
+
         refs: Dict[str, Dict[str, Any]] = {}
         for e in events:
-            domain = e.get("referrer_domain") or "Direct / None"
+            domain = e.get("referrer_domain")
+            cat = e.get("referrer_category") or classify_referrer(domain, allowed_origins)
+            if not domain:
+                domain = cat if (cat and cat != "Direct / None") else "Direct / None"
             if domain not in refs:
-                refs[domain] = {"views": 0, "visitors": set()}
+                refs[domain] = {"category": cat, "views": 0, "visitors": set()}
             refs[domain]["views"] += 1
             if e.get("visitor_id"):
                 refs[domain]["visitors"].add(e.get("visitor_id"))
@@ -652,6 +715,7 @@ class FirestoreRepo:
         for domain, data in refs.items():
             items.append({
                 "referrer_domain": domain,
+                "referrer_category": data.get("category", "Direct / None"),
                 "views_count": data["views"],
                 "visitors_count": len(data["visitors"]),
             })

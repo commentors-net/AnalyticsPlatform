@@ -8,7 +8,7 @@ import logging
 import os
 from urllib.parse import urlsplit
 
-from flask import Flask, g, jsonify
+from flask import Flask, g, jsonify, request
 from analytics.client import AnalyticsClient
 
 
@@ -72,12 +72,16 @@ def create_app():
             return
         try:
             visitor_id, session_id = _existing_identifiers()
+            ua = request.headers.get("User-Agent", "")[:512] if request else None
+            # Optional trustworthy coarse country from edge proxy headers (e.g. CF-IPCountry)
+            country = request.headers.get("CF-IPCountry", "")[:2].upper() if request else None
+            country = country if country and len(country) == 2 and country.isalpha() and country not in ("LO", "ZZ", "XX") else None
             metadata = {"source": "flask_example"}
             if event_name is None:
-                client.pageview(page_path, visitor_id=visitor_id, session_id=session_id, metadata=metadata)
+                client.pageview(page_path, visitor_id=visitor_id, session_id=session_id, user_agent=ua, country_code=country, metadata=metadata)
             else:
                 client.track(event_name, event_type="custom", page_path=page_path,
-                             visitor_id=visitor_id, session_id=session_id, metadata=metadata)
+                             visitor_id=visitor_id, session_id=session_id, user_agent=ua, country_code=country, metadata=metadata)
         except Exception:
             # Also protects the host if an optional existing-ID adapter fails.
             pass

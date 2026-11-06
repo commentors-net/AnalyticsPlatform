@@ -86,3 +86,40 @@ def extract_referrer_domain(referrer: Optional[str]) -> Optional[str]:
         return domain or None
     except Exception:
         return None
+
+
+SEARCH_ENGINES = {
+    "google.com", "bing.com", "duckduckgo.com", "yahoo.com",
+    "baidu.com", "yandex.ru", "yandex.com", "ecosia.org", "ask.com",
+}
+
+SOCIAL_NETWORKS = {
+    "t.co", "twitter.com", "x.com", "linkedin.com", "facebook.com",
+    "instagram.com", "reddit.com", "youtube.com", "tiktok.com",
+    "pinterest.com", "threads.net", "whatsapp.com",
+}
+
+
+def classify_referrer(domain: Optional[str], allowed_origins: Optional[str] = None) -> str:
+    """Classify coarse referrer domain into Direct / None, Search, Social, Internal, or Referral."""
+    if not domain or domain.lower() in ("direct / none", "direct", "none"):
+        return "Direct / None"
+
+    clean = domain.lower().strip()
+
+    # Check internal origins
+    if allowed_origins:
+        for orig in (o.strip().lower() for o in allowed_origins.split(",") if o.strip()):
+            host = orig.replace("http://", "").replace("https://", "").split("/")[0].split(":")[0]
+            if clean == host or clean.endswith(f".{host}"):
+                return "Internal"
+
+    for se in SEARCH_ENGINES:
+        if clean == se or clean.endswith(f".{se}"):
+            return "Search"
+
+    for sn in SOCIAL_NETWORKS:
+        if clean == sn or clean.endswith(f".{sn}"):
+            return "Social"
+
+    return "Referral"

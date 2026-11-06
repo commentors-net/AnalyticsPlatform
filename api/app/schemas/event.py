@@ -56,8 +56,77 @@ class SingleEventSchema(BaseModel):
     page_path: str = Field(min_length=1, max_length=1024, example="/dashboard/home")
     referrer: Optional[str] = Field(default=None, max_length=1024)
     duration_ms: Optional[int] = Field(default=None, ge=0)
+    source: Optional[str] = Field(default=None, max_length=64, description="Reporting source e.g. python, browser, server")
+    user_agent: Optional[str] = Field(default=None, max_length=512, description="Client user agent when forwarded by server")
+    country_code: Optional[str] = Field(default=None, max_length=2, description="Coarse ISO-3166-1 alpha-2 country code")
+    device_family: Optional[str] = Field(default=None, max_length=32, description="Reviewed device category")
+    browser_family: Optional[str] = Field(default=None, max_length=32, description="Reviewed browser category")
+    os_family: Optional[str] = Field(default=None, max_length=32, description="Reviewed OS category")
+    client_device: Optional[str] = Field(default=None, max_length=32, description="Client device category alias")
+    client_browser: Optional[str] = Field(default=None, max_length=32, description="Client browser category alias")
+    referrer_category: Optional[str] = Field(default=None, max_length=64, description="Referrer category")
+    client_country: Optional[str] = Field(default=None, max_length=2, description="Coarse country code alias")
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: Optional[datetime] = Field(default=None)
+
+    @field_validator("country_code", "client_country")
+    @classmethod
+    def validate_country_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            code = v.strip().upper()
+            if not re.fullmatch(r"[A-Z]{2}", code) or code in ("LO", "ZZ", "XX"):
+                raise ValueError("Invalid ISO 3166-1 alpha-2 country code")
+            return code
+        return None
+
+    @field_validator("device_family", "client_device")
+    @classmethod
+    def validate_device_family(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            dev = v.lower().strip()
+            allowed = {"desktop", "mobile", "tablet", "bot", "unknown"}
+            return dev if dev in allowed else "Other"
+        return None
+
+    @field_validator("browser_family", "client_browser")
+    @classmethod
+    def validate_browser_family(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            norm = {
+                "chrome": "Chrome", "firefox": "Firefox", "safari": "Safari",
+                "edge": "Edge", "opera": "Opera", "mobile safari": "Mobile Safari",
+                "chrome mobile": "Chrome Mobile", "other": "Other", "unknown": "unknown"
+            }.get(v.lower().strip(), "Other")
+            return norm
+        return None
+
+    @field_validator("referrer_category")
+    @classmethod
+    def validate_referrer_category(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            norm = {
+                "direct": "Direct / None", "search": "Search", "social": "Social",
+                "internal": "Internal", "other": "Referral", "referral": "Referral",
+                "direct / none": "Direct / None",
+            }.get(v.lower().strip(), "Direct / None")
+            return norm
+        return None
+
+    @field_validator("os_family")
+    @classmethod
+    def validate_os_family(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            allowed = {"Windows", "Linux", "Android", "iOS", "macOS", "Mac OS X", "Other", "unknown"}
+            return v if v in allowed else "Other"
+        return None
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            cleaned = v.strip().lower()[:64]
+            return cleaned if cleaned else None
+        return None
 
     @field_validator("metadata")
     @classmethod

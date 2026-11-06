@@ -54,6 +54,8 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
                         page_path=path,
                         referrer=referrer,
                         duration_ms=duration_ms,
+                        source="python",
+                        user_agent=user_agent[:512] if user_agent else None,
                         metadata=metadata,
                     )
                 else:
@@ -63,6 +65,8 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
                         page_path=path,
                         referrer=referrer,
                         duration_ms=duration_ms,
+                        source="python",
+                        user_agent=user_agent[:512] if user_agent else None,
                         metadata=metadata,
                     )
             except Exception:

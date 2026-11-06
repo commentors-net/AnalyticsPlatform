@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlsplit
 
-SOURCES = {"browser", "python", "server", "backend", "flask_example", "smoke_test"}
+SOURCES = {"browser", "python", "server", "backend", "flask_example", "smoke_test", "sdk", "api", "direct", "public_homepage_notification"}
 PATH_SEGMENTS = {"home", "pricing", "dashboard", "analytics", "action", "checkout", "search", "settings", "products", "docs", "help", "about", "contact", "features", "welcome", "integration", "plans"}
 
 
@@ -40,9 +40,9 @@ def safe_timestamp(value):
 
 def family(value, kind):
     allowed = {
-        "device": {"desktop", "mobile", "tablet", "bot", "Other"},
-        "browser": {"Chrome", "Firefox", "Safari", "Edge", "Opera", "Mobile Safari", "Chrome Mobile", "Other"},
-        "os": {"Windows", "Linux", "Android", "iOS", "Mac OS X", "Other"},
+        "device": {"desktop", "mobile", "tablet", "bot", "unknown", "Other"},
+        "browser": {"Chrome", "Firefox", "Safari", "Edge", "Opera", "Mobile Safari", "Chrome Mobile", "Other", "unknown"},
+        "os": {"Windows", "Linux", "Android", "iOS", "Mac OS X", "macOS", "Other", "unknown"},
     }
     return value if isinstance(value, str) and value in allowed[kind] else None
 
@@ -67,9 +67,9 @@ def safe_metadata(value):
 
 def geography(record):
     # LO/DEV/Localhost and old unproven location claims are not visitor geography.
-    # No verified lookup is configured today; only server-provenanced data may qualify.
+    # Only verified lookup or trusted edge/client coarse country information qualifies.
     country = record.get("country_code")
-    if record.get("geo_source") != "verified_coarse_lookup" or not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country) or country in ("LO", "ZZ", "XX"):
+    if record.get("geo_source") not in ("verified_coarse_lookup", "trusted_edge_or_client") or not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country) or country in ("LO", "ZZ", "XX"):
         return None, None
     city = record.get("city_name")
     if not isinstance(city, str) or not re.fullmatch(r"[A-Za-z .'-]{1,64}", city) or city.lower() in ("localhost", "local", "unknown"):

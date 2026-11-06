@@ -373,6 +373,17 @@ body {
 
 .kpi-delta.pos { color: var(--live-color); }
 .kpi-delta.neg { color: var(--danger-color); }
+.kpi-delta.unavailable { color: var(--text-muted); font-weight: 500; font-style: italic; }
+
+.badge-subtle {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
 
 .kpi-sub {
   font-size: 0.75rem;

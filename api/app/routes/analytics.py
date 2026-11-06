@@ -29,6 +29,7 @@ class MetricDelta(BaseModel):
     value: float
     previous_value: float
     change_pct: float
+    available: bool = True
 
 
 class OverviewMetricsResponse(BaseModel):
@@ -36,6 +37,7 @@ class OverviewMetricsResponse(BaseModel):
     environment: str
     start_date: str
     end_date: str
+    data_status: str = "live"
     pageviews: MetricDelta
     visitors: MetricDelta
     sessions: MetricDelta
@@ -60,6 +62,7 @@ class PageMetricItem(BaseModel):
 
 class ReferrerItem(BaseModel):
     referrer_domain: str
+    referrer_category: str = "Direct / None"
     views_count: int
     visitors_count: int
 
@@ -140,7 +143,7 @@ async def get_timeseries_metrics(
     start = start_date or (end - timedelta(days=30))
     env_val = environment.value if hasattr(environment, "value") else str(environment)
 
-    items = repo.get_timeseries_metrics(app_id, env_val, interval, start, end)
+    items = repo.get_timeseries_metrics(app_id, env_val, interval, start, end, fill_sparse=(start_date is not None))
     return [TimeseriesPoint.model_validate(i) for i in items]
 
 
@@ -244,24 +247,42 @@ async def get_recent_events(
     env_val = environment.value if hasattr(environment, "value") else str(environment)
 
     raw_events = repo.get_live_events(app_id, env_val, limit=limit)
-    return [
-        RecentEventItem(
-            event_id=safe_event_id(r.get("event_id")),
-            timestamp=safe_timestamp(r.get("timestamp")),
-            event_type=r.get("event_type") if r.get("event_type") in ("pageview", "custom", "click", "timing") else "Unknown",
-            event_name=safe_event_name(r.get("event_name")),
-            page_path=safe_path(r.get("page_path")),
-            referrer_domain=None,
-            device_family=family(r.get("device_family"), "device"),
-            browser_family=family(r.get("browser_family"), "browser"),
-            os_family=family(r.get("os_family"), "os"),
-            country_code=geography(r)[0],
-            duration_ms=r.get("duration_ms") if type(r.get("duration_ms")) is int and 0 <= r["duration_ms"] <= 86400000 else None,
-            metadata=safe_metadata(r.get("metadata")),
-            source=safe_metadata(r.get("metadata")).get("source", "Not reported"),
+    items = []
+    for r in raw_events:
+        meta = safe_metadata(r.get("metadata"))
+        src = r.get("source") or meta.get("source")
+        if not src or src == "Not reported":
+            br = family(r.get("browser_family"), "browser")
+            dev = family(r.get("device_family"), "device")
+            if br and br not in ("Other", "unknown"):
+                src = "browser"
+            elif meta.get("method") or "python" in str(meta.get("user_agent", "")).lower():
+                src = "python"
+            elif dev == "desktop" and not br and r.get("event_type") in ("pageview", "custom", "click", "timing"):
+                src = "server"
+            elif r.get("event_type") == "pageview" and br:
+                src = "browser"
+            else:
+                src = "Not reported"
+
+        items.append(
+            RecentEventItem(
+                event_id=safe_event_id(r.get("event_id")),
+                timestamp=safe_timestamp(r.get("timestamp")),
+                event_type=r.get("event_type") if r.get("event_type") in ("pageview", "custom", "click", "timing") else "Unknown",
+                event_name=safe_event_name(r.get("event_name")),
+                page_path=safe_path(r.get("page_path")),
+                referrer_domain=None,
+                device_family=family(r.get("device_family"), "device"),
+                browser_family=family(r.get("browser_family"), "browser"),
+                os_family=family(r.get("os_family"), "os"),
+                country_code=geography(r)[0],
+                duration_ms=r.get("duration_ms") if type(r.get("duration_ms")) is int and 0 <= r["duration_ms"] <= 86400000 else None,
+                metadata=meta,
+                source=src,
+            )
         )
-        for r in raw_events
-    ]
+    return items
 
 
 @router.post("/export")

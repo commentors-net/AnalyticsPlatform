@@ -354,11 +354,21 @@
       if (res.ok && isCurrent()) {
         const d = await res.json();
         if (!isCurrent()) return;
-        renderKPI(el.kpiPageviews, el.kpiPageviewsDelta, d.pageviews.value, d.pageviews.change_pct);
-        renderKPI(el.kpiVisitors, el.kpiVisitorsDelta, d.visitors.value, d.visitors.change_pct);
-        renderKPI(el.kpiSessions, el.kpiSessionsDelta, d.sessions.value, d.sessions.change_pct);
-        renderKPI(el.kpiBounce, el.kpiBounceDelta, `${d.bounce_rate.value}%`, d.bounce_rate.change_pct, '%');
-        renderKPI(el.kpiDuration, el.kpiDurationDelta, `${d.avg_duration_sec.value}s`, d.avg_duration_sec.change_pct, '%');
+        renderKPI(el.kpiPageviews, el.kpiPageviewsDelta, d.pageviews.value, d.pageviews.change_pct, '%', d.pageviews.available);
+        renderKPI(el.kpiVisitors, el.kpiVisitorsDelta, d.visitors.value, d.visitors.change_pct, '%', d.visitors.available, 'Absent identifiers');
+        renderKPI(el.kpiSessions, el.kpiSessionsDelta, d.sessions.value, d.sessions.change_pct, '%', d.sessions.available, 'Absent identifiers');
+        renderKPI(el.kpiBounce, el.kpiBounceDelta, `${d.bounce_rate.value}%`, d.bounce_rate.change_pct, '%', d.bounce_rate.available, 'Absent identifiers');
+        renderKPI(el.kpiDuration, el.kpiDurationDelta, `${d.avg_duration_sec.value}s`, d.avg_duration_sec.change_pct, '%', d.avg_duration_sec.available, 'Absent identifiers');
+
+        if (d.data_status === 'sample') {
+          el.testBanner.textContent = 'Viewing synthetic sample dataset';
+          el.testBanner.classList.remove('hidden');
+        } else if (state.selectedEnv === 'test') {
+          el.testBanner.textContent = 'You are viewing the TEST environment. Data is segregated from production.';
+          el.testBanner.classList.remove('hidden');
+        } else {
+          el.testBanner.classList.add('hidden');
+        }
       }
     } catch (e) { console.error('Overview error', e); }
 
@@ -405,7 +415,10 @@
         } else {
           el.referrersBody.innerHTML = refs.map(r => `
             <tr>
-              <td>${escapeHtml(r.referrer_domain)}</td>
+              <td>
+                <span>${escapeHtml(r.referrer_domain)}</span>
+                ${r.referrer_category && r.referrer_category !== 'Direct / None' ? `<span class="badge-subtle">${escapeHtml(r.referrer_category)}</span>` : ''}
+              </td>
               <td class="num font-bold">${r.views_count.toLocaleString()}</td>
               <td class="num">${r.visitors_count.toLocaleString()}</td>
             </tr>
@@ -482,7 +495,13 @@
     }
   }
 
-  function renderKPI(valEl, deltaEl, val, delta, unit = '%') {
+  function renderKPI(valEl, deltaEl, val, delta, unit = '%', available = true, unavailableLabel = 'Not tracked') {
+    if (available === false) {
+      valEl.textContent = '—';
+      deltaEl.textContent = unavailableLabel;
+      deltaEl.className = 'kpi-delta unavailable';
+      return;
+    }
     valEl.textContent = typeof val === 'number' ? val.toLocaleString() : val;
     deltaEl.textContent = `${delta >= 0 ? '+' : ''}${delta}${unit}`;
     deltaEl.className = `kpi-delta ${delta >= 0 ? 'pos' : 'neg'}`;
@@ -517,13 +536,22 @@
     const maxVal = Math.max(...points.map(p => p.pageviews), 5);
     const stepX = width / Math.max(points.length - 1, 1);
 
-    const pathD = points.map((p, i) => {
-      const x = i * stepX;
-      const y = height - (p.pageviews / maxVal) * (height - 30) - 15;
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    }).join(' ');
+    let pathD = '';
+    if (points.length === 1) {
+      const y = height - (points[0].pageviews / maxVal) * (height - 30) - 15;
+      pathD = `M 0.0 ${y.toFixed(1)} L ${width}.0 ${y.toFixed(1)}`;
+    } else {
+      pathD = points.map((p, i) => {
+        const x = i * stepX;
+        const y = height - (p.pageviews / maxVal) * (height - 30) - 15;
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      }).join(' ');
+    }
 
-    const areaD = `${pathD} L ${((points.length - 1) * stepX).toFixed(1)} ${height} L 0 ${height} Z`;
+    const areaD = `${pathD} L ${width} ${height} L 0 ${height} Z`;
+
+    const startDate = points[0]?.timestamp ? points[0].timestamp.split('T')[0] : '';
+    const endDate = points[points.length - 1]?.timestamp ? points[points.length - 1].timestamp.split('T')[0] : '';
 
     el.trendSvg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     el.trendSvg.innerHTML = `
@@ -533,8 +561,11 @@
           <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0" />
         </linearGradient>
       </defs>
+      <line x1="0" y1="${height - 15}" x2="${width}" y2="${height - 15}" stroke="rgba(148, 163, 184, 0.15)" stroke-dasharray="4" />
       <path d="${areaD}" fill="url(#grad)" />
       <path d="${pathD}" fill="none" stroke="#38bdf8" stroke-width="2.5" />
+      <text x="12" y="${height - 2}" fill="#64748b" font-size="11">${startDate}</text>
+      <text x="${width - 12}" y="${height - 2}" text-anchor="end" fill="#64748b" font-size="11">${endDate}</text>
     `;
   }
 

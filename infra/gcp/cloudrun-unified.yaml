@@ -27,7 +27,7 @@ spec:
       containerConcurrency: 80
       timeoutSeconds: 30
       containers:
-        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-platform:20261105-p19-dashboard-improvements
+        - image: us-central1-docker.pkg.dev/leave-tracker-2025/analytics-repo/analytics-platform:20261106-p21-askanna-reconciliation
           resources:
             limits:
               cpu: "1000m"

@@ -55,7 +55,7 @@ Content-Type: application/json
 
 The server also accepts `X-Write-Key` or a JSON `write_key`; precedence is nonempty X-Write-Key, a Bearer collection key, then body key. A query-string key is not collection authentication. Ordinary Python calls omit `Origin` and do not require CORS or Google Sign-In. Do not forward browser cookies, Google tokens, authentication headers, raw client IP or request bodies to the collector.
 
-These are server-originated events. The collector sees the Python HTTP client's connection/user agent, so device/geography classification can describe the server or be unknown; it does not automatically describe the end user's browser. Reusing existing pseudonymous IDs does not change that attribution.
+These are server-originated events. When using server middleware (e.g. Flask/FastAPI), the host application can forward the visitor's `user_agent` and coarse `country_code` (e.g. from edge proxy headers such as `CF-IPCountry` or `X-AppEngine-Country`) to accurately attribute device, browser, and country metrics. If omitted, the collector safely attributes server provenance and maps `source="python"`. Reusing existing pseudonymous IDs under approved consent policies enables unique visitor and session tracking; absent identifiers are accurately presented as uncollected metrics rather than misleading zero counts.
 
 If a browser Origin is supplied, explicit `live_origins`/`test_origins` settings match exactly by environment (scheme, hostname, port). Missing Origin is allowed for server collectors. Legacy app records without scoped origins use the older shared-origin behavior. Origin checks are abuse checks, not a substitute for the write key.
 

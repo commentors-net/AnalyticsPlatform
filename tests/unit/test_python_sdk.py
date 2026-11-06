@@ -116,3 +116,54 @@ def test_disabled_client_is_noop():
     client.pageview("/noop")
     client.flush()
     client.close()
+
+
+def test_client_enqueues_extended_fields():
+    """Verify that Python SDK enqueues source, user_agent, country_code, and duration_ms accurately."""
+    client = AnalyticsClient(
+        endpoint="http://localhost:5433",
+        write_key="apk_test_dummy_key",
+        enabled=False,  # Keep worker from making network requests
+    )
+    # Enable internal queue without starting worker thread
+    client.enabled = True
+    client.track(
+        event_name="custom_action",
+        page_path="/action",
+        duration_ms=450,
+        source="python",
+        user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+        country_code="US",
+        device_family="mobile",
+        browser_family="Safari",
+        os_family="iOS",
+        metadata={"key": "val"},
+    )
+    item = client._queue.get_nowait()
+    assert item["event_name"] == "custom_action"
+    assert item["duration_ms"] == 450
+    assert item["source"] == "python"
+    assert item["user_agent"] == "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+    assert item["country_code"] == "US"
+    assert item["device_family"] == "mobile"
+    assert item["browser_family"] == "Safari"
+    assert item["os_family"] == "iOS"
+    assert item["metadata"]["source"] == "python"
+    assert item["metadata"]["key"] == "val"
+
+    client.pageview(
+        page_path="/home",
+        duration_ms=1200,
+        source="python",
+        user_agent="Custom-Browser/1.0",
+        country_code="GB",
+    )
+    pv_item = client._queue.get_nowait()
+    assert pv_item["event_name"] == "pageview"
+    assert pv_item["event_type"] == "pageview"
+    assert pv_item["page_path"] == "/home"
+    assert pv_item["duration_ms"] == 1200
+    assert pv_item["source"] == "python"
+    assert pv_item["user_agent"] == "Custom-Browser/1.0"
+    assert pv_item["country_code"] == "GB"
+    client.enabled = False

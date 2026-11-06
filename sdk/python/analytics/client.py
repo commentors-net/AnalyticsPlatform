@@ -65,6 +65,12 @@ class AnalyticsClient:
         duration_ms: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
         timestamp: Optional[datetime.datetime] = None,
+        source: Optional[str] = "python",
+        user_agent: Optional[str] = None,
+        country_code: Optional[str] = None,
+        device_family: Optional[str] = None,
+        browser_family: Optional[str] = None,
+        os_family: Optional[str] = None,
     ) -> None:
         """Enqueue a telemetry event. Never raises exceptions (fail-open contract)."""
         if not self.enabled:
@@ -72,6 +78,10 @@ class AnalyticsClient:
 
         try:
             ts = (timestamp or datetime.datetime.now(datetime.timezone.utc)).isoformat()
+            meta = dict(metadata or {})
+            if source and "source" not in meta:
+                meta["source"] = source
+
             event = {
                 "event_id": str(uuid.uuid4()),
                 "event_type": event_type,
@@ -81,7 +91,13 @@ class AnalyticsClient:
                 "session_id": session_id,
                 "referrer": referrer,
                 "duration_ms": duration_ms,
-                "metadata": metadata or {},
+                "source": source,
+                "user_agent": user_agent,
+                "country_code": country_code,
+                "device_family": device_family,
+                "browser_family": browser_family,
+                "os_family": os_family,
+                "metadata": meta,
                 "timestamp": ts,
             }
 
@@ -106,7 +122,11 @@ class AnalyticsClient:
         visitor_id: Optional[str] = None,
         session_id: Optional[str] = None,
         referrer: Optional[str] = None,
+        duration_ms: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = "python",
+        user_agent: Optional[str] = None,
+        country_code: Optional[str] = None,
     ) -> None:
         """Convenience helper to record a pageview event."""
         self.track(
@@ -116,7 +136,11 @@ class AnalyticsClient:
             visitor_id=visitor_id,
             session_id=session_id,
             referrer=referrer,
+            duration_ms=duration_ms,
             metadata=metadata,
+            source=source,
+            user_agent=user_agent,
+            country_code=country_code,
         )
 
     def flush(self) -> None:
@@ -235,6 +259,12 @@ class AsyncAnalyticsClient:
         duration_ms: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
         timestamp: Optional[datetime.datetime] = None,
+        source: Optional[str] = "python",
+        user_agent: Optional[str] = None,
+        country_code: Optional[str] = None,
+        device_family: Optional[str] = None,
+        browser_family: Optional[str] = None,
+        os_family: Optional[str] = None,
     ) -> None:
         """Enqueue an event asynchronously. Never raises exceptions (fail-open)."""
         if not self.enabled or self._closing:
@@ -243,6 +273,10 @@ class AsyncAnalyticsClient:
         try:
             await self._ensure_started()
             ts = (timestamp or datetime.datetime.now(datetime.timezone.utc)).isoformat()
+            meta = dict(metadata or {})
+            if source and "source" not in meta:
+                meta["source"] = source
+
             event = {
                 "event_id": str(uuid.uuid4()),
                 "event_type": event_type,
@@ -252,7 +286,13 @@ class AsyncAnalyticsClient:
                 "session_id": session_id,
                 "referrer": referrer,
                 "duration_ms": duration_ms,
-                "metadata": metadata or {},
+                "source": source,
+                "user_agent": user_agent,
+                "country_code": country_code,
+                "device_family": device_family,
+                "browser_family": browser_family,
+                "os_family": os_family,
+                "metadata": meta,
                 "timestamp": ts,
             }
 
@@ -272,7 +312,11 @@ class AsyncAnalyticsClient:
         visitor_id: Optional[str] = None,
         session_id: Optional[str] = None,
         referrer: Optional[str] = None,
+        duration_ms: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = "python",
+        user_agent: Optional[str] = None,
+        country_code: Optional[str] = None,
     ) -> None:
         await self.track(
             event_name="pageview",
@@ -281,7 +325,11 @@ class AsyncAnalyticsClient:
             visitor_id=visitor_id,
             session_id=session_id,
             referrer=referrer,
+            duration_ms=duration_ms,
             metadata=metadata,
+            source=source,
+            user_agent=user_agent,
+            country_code=country_code,
         )
 
     async def flush(self) -> None:
